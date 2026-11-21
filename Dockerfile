@@ -12,7 +12,9 @@ RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" npm ci
 COPY . .
 RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" \
     JWT_SECRET="build-time-placeholder-not-used-at-runtime-000" \
-    npm run build
+    npm run build \
+ && npx esbuild prisma/seed.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/seed.mjs \
+      --banner:js="import{createRequire}from'module';const require=createRequire(import.meta.url);"
 
 # Prisma CLI only, for `migrate deploy` on start-up
 FROM node:${NODE_VERSION} AS tools
@@ -30,6 +32,7 @@ COPY --from=build --chown=app:app /src/.next/standalone ./
 COPY --from=build --chown=app:app /src/.next/static ./.next/static
 COPY --from=build --chown=app:app /src/public ./public
 COPY --from=tools --chown=app:app /tools ./tools
+COPY --from=build --chown=app:app /src/dist/seed.mjs ./tools/seed.mjs
 COPY --chown=app:app docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh
 USER app
