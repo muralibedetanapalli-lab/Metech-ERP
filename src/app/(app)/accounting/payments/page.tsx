@@ -18,7 +18,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
     writable ? lookups.parties() : [],
     writable ? lookups.bankAccounts() : [],
     writable ? lookups.accounts() : [],
-    writable ? db.invoice.findMany({ where: { status: { in: ["POSTED", "PARTIAL"] } }, select: { id: true, number: true, kind: true, partyId: true, total: true, amountPaid: true } }) : [],
+    writable ? db.invoice.findMany({ where: { status: { in: ["POSTED", "PARTIAL"] }, docType: { not: "CREDIT_NOTE" } }, select: { id: true, number: true, kind: true, partyId: true, total: true, amountPaid: true } }) : [],
   ]);
   return (
     <>

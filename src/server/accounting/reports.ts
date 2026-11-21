@@ -1,4 +1,5 @@
 import "server-only";
+import { docLabel, docSign } from "@/lib/doc-types";
 import { db } from "@/server/db";
 import type { AccountType } from "@/generated/prisma/client";
 import { isDebitNormal } from "./coa";
@@ -107,19 +108,24 @@ export async function gstSummary(from: Date, to: Date) {
     sgst: (inp.sgst?.debit ?? 0) - (inp.sgst?.credit ?? 0),
     igst: (inp.igst?.debit ?? 0) - (inp.igst?.credit ?? 0),
   };
-  const rows = invoices.map((i) => ({
-    date: i.date.toISOString().slice(0, 10),
-    type: i.kind === "SALES" ? "Outward (B2" + (i.party.gstin ? "B)" : "C)") : "Inward",
-    number: i.kind === "SALES" ? i.number : `${i.number}${i.vendorRef ? ` / ${i.vendorRef}` : ""}`,
-    party: i.party.name,
-    gstin: i.party.gstin ?? "",
-    pos: i.placeOfSupply,
-    taxable: i.taxableAmount,
-    cgst: i.cgst,
-    sgst: i.sgst,
-    igst: i.igst,
-    total: i.total,
-  }));
+  // Credit notes reduce the tax, so they show as negative amounts.
+  const rows = invoices.map((i) => {
+    const sg = docSign(i.docType);
+    const base = i.kind === "SALES" ? "Outward (B2" + (i.party.gstin ? "B)" : "C)") : "Inward";
+    return {
+      date: i.date.toISOString().slice(0, 10),
+      type: i.docType === "INVOICE" ? base : `${base} · ${docLabel(i.kind, i.docType, true).toLowerCase()}`,
+      number: i.kind === "SALES" ? i.number : `${i.number}${i.vendorRef ? ` / ${i.vendorRef}` : ""}`,
+      party: i.party.name,
+      gstin: i.party.gstin ?? "",
+      pos: i.placeOfSupply,
+      taxable: sg * i.taxableAmount,
+      cgst: sg * i.cgst,
+      sgst: sg * i.sgst,
+      igst: sg * i.igst,
+      total: sg * i.total,
+    };
+  });
   const outTotal = outward.cgst + outward.sgst + outward.igst;
   const inTotal = input.cgst + input.sgst + input.igst;
   return { rows, outward, input, outTotal, inTotal, netPayable: outTotal - inTotal };
@@ -160,7 +166,7 @@ export async function ledger(opts: { accountId?: string; partyId?: string; from:
   return { openingBalance, rows, closingBalance: running };
 }
 
-/** Outstanding invoices by party with simple ageing buckets. */
+/** Outstanding invoices by party with simple ageing buckets. Unapplied credit notes show as negative balances. */
 export async function outstanding(kind: "SALES" | "PURCHASE", asOf = new Date()) {
   const invoices = await db.invoice.findMany({
     where: { kind, status: { in: ["POSTED", "PARTIAL"] } },
@@ -170,16 +176,17 @@ export async function outstanding(kind: "SALES" | "PURCHASE", asOf = new Date())
   return invoices.map((i) => {
     const due = i.dueDate ?? i.date;
     const days = Math.floor((asOf.getTime() - due.getTime()) / 86_400_000);
+    const sg = docSign(i.docType);
     return {
       id: i.id,
-      number: i.number,
+      number: i.docType === "INVOICE" ? i.number : `${i.number} (${docLabel(i.kind, i.docType, true).toLowerCase()})`,
       party: i.party.name,
       partyId: i.party.id,
       date: i.date.toISOString().slice(0, 10),
       due: due.toISOString().slice(0, 10),
-      total: i.total,
-      balance: i.total - i.amountPaid,
-      bucket: days <= 0 ? "Not due" : days <= 30 ? "1–30 days" : days <= 60 ? "31–60 days" : days <= 90 ? "61–90 days" : "90+ days",
+      total: sg * i.total,
+      balance: sg * (i.total - i.amountPaid),
+      bucket: i.docType === "CREDIT_NOTE" ? "Credit" : days <= 0 ? "Not due" : days <= 30 ? "1–30 days" : days <= 60 ? "31–60 days" : days <= 90 ? "61–90 days" : "90+ days",
     };
   });
 }

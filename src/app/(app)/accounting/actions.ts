@@ -25,7 +25,7 @@ export async function saveInvoice(_p: ActionState, fd: FormData): Promise<Action
     const due = str(fd, "dueDate");
     id = (
       await createInvoice(
-        { ...payload, date: dayDate(req(fd, "date", "Date")), dueDate: due ? dayDate(due) : null, vendorRef: str(fd, "vendorRef"), notes: str(fd, "notesText"), costCentreId: str(fd, "costCentreId") },
+        { ...payload, date: dayDate(req(fd, "date", "Date")), dueDate: due ? dayDate(due) : null, vendorRef: str(fd, "vendorRef"), notes: str(fd, "notesText"), costCentreId: str(fd, "costCentreId"), noteReason: str(fd, "noteReason") },
         user.id,
       )
     ).id;
@@ -38,7 +38,7 @@ export async function voidInvoiceAction(_p: ActionState, fd: FormData): Promise<
   return run(async () => {
     await requirePermission("accounting.write");
     await voidInvoice(req(fd, "id"), str(fd, "reason") ?? "Voided");
-    return "Invoice voided";
+    return "Voided";
   }, ACC_PATHS);
 }
 

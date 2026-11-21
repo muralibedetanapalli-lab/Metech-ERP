@@ -8,7 +8,10 @@ const amt = (p: number) => (p / 100).toLocaleString("en-IN", { minimumFractionDi
 
 /** GST tax invoice (or purchase bill record) as an A4 PDF. */
 export async function invoicePdf(invoiceId: string) {
-  const inv = await db.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { party: true, lines: { orderBy: { sortOrder: "asc" } } } });
+  const inv = await db.invoice.findUniqueOrThrow({
+    where: { id: invoiceId },
+    include: { party: true, lines: { orderBy: { sortOrder: "asc" } }, originalInvoice: { select: { number: true, date: true } } },
+  });
   const co = await db.companySettings.upsert({ where: { id: "company" }, create: {}, update: {} });
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -21,7 +24,9 @@ export async function invoicePdf(invoiceId: string) {
 
   const sales = inv.kind === "SALES";
   text(co.legalName ?? co.name, M, y, 16, bold);
-  right(sales ? (inv.party.gstin ? "TAX INVOICE" : "INVOICE") : "PURCHASE BILL", 555, y, 14, bold);
+  const heading =
+    inv.docType === "CREDIT_NOTE" ? "CREDIT NOTE" : inv.docType === "DEBIT_NOTE" ? "DEBIT NOTE" : sales ? (inv.party.gstin ? "TAX INVOICE" : "INVOICE") : "PURCHASE BILL";
+  right(heading, 555, y, 14, bold);
   y -= 16;
   for (const l of [co.address, co.gstin ? `GSTIN ${co.gstin}` : null, [co.email, co.phone].filter(Boolean).join(" · ") || null].filter(Boolean) as string[]) {
     text(l, M, y, 9);
@@ -31,7 +36,9 @@ export async function invoicePdf(invoiceId: string) {
   for (const [k, v] of [
     ["Number", inv.number],
     ["Date", inv.date.toISOString().slice(0, 10)],
-    ["Due", inv.dueDate?.toISOString().slice(0, 10) ?? "-"],
+    ...(inv.docType === "INVOICE" ? [["Due", inv.dueDate?.toISOString().slice(0, 10) ?? "-"]] : []),
+    ...(inv.originalInvoice ? [["Against invoice", `${inv.originalInvoice.number} dt ${inv.originalInvoice.date.toISOString().slice(0, 10)}`]] : []),
+    ...(inv.noteReason ? [["Reason", inv.noteReason]] : []),
     ["Place of supply", `${inv.placeOfSupply} ${GST_STATES[inv.placeOfSupply] ?? ""}`],
     ...(inv.vendorRef ? [["Supplier bill", inv.vendorRef]] : []),
   ]) {

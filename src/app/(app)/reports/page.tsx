@@ -26,6 +26,10 @@ export default async function ReportsPage() {
             <p className="mt-1 text-sm text-muted-foreground">{DESCRIPTIONS[t]}</p>
           </Link>
         ))}
+        <Link href="/reports/gstr1" className="rounded-xl border bg-card p-4 hover:border-primary/50">
+          <div className="font-semibold">GSTR-1</div>
+          <p className="mt-1 text-sm text-muted-foreground">Monthly outward supplies (B2B, B2C, credit/debit notes, HSN) as a JSON file for the GST portal.</p>
+        </Link>
         <Link href="/accounting/ledger" className="rounded-xl border bg-card p-4 hover:border-primary/50">
           <div className="font-semibold">Ledgers</div>
           <p className="mt-1 text-sm text-muted-foreground">Account and party statements with running balance.</p>

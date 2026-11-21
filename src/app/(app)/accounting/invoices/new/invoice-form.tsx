@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GST_RATES_BPS, GST_STATES, computeInvoiceTotals } from "@/lib/gst";
 import { formatINR, parseRupees } from "@/lib/money";
+import { docLabel, type DocType } from "@/lib/doc-types";
 import { saveInvoice } from "../../actions";
 
 interface Line {
@@ -21,7 +22,29 @@ interface Line {
   accountId: string;
 }
 
+/** An invoice a credit / debit note can refer to, with its lines for copying. */
+export interface SourceInvoice {
+  id: string;
+  number: string;
+  partyId: string;
+  date: string;
+  placeOfSupply: string;
+  total: number;
+  lines: { itemId: string | null; description: string; hsnSac: string | null; quantity: number; rate: number; discount: number; taxRateBps: number; accountId: string }[];
+}
+
 const blank = (): Line => ({ itemId: "", description: "", hsnSac: "", quantity: "1", rate: "", discount: "", taxRateBps: 1800, accountId: "" });
+const fromSource = (s: SourceInvoice): Line[] =>
+  s.lines.map((l) => ({
+    itemId: l.itemId ?? "",
+    description: l.description,
+    hsnSac: l.hsnSac ?? "",
+    quantity: String(l.quantity),
+    rate: String(l.rate / 100),
+    discount: l.discount ? String(l.discount / 100) : "",
+    taxRateBps: l.taxRateBps,
+    accountId: l.accountId,
+  }));
 const safeRupees = (s: string) => {
   try {
     return parseRupees(s);
@@ -39,8 +62,14 @@ export function InvoiceForm({
   companyState,
   today,
   defaultPartyId,
+  docType = "INVOICE",
+  sourceInvoices = [],
+  defaultSourceId,
 }: {
   kind: "SALES" | "PURCHASE";
+  docType?: DocType;
+  sourceInvoices?: SourceInvoice[];
+  defaultSourceId?: string;
   parties: { id: string; name: string; stateCode: string | null; gstin: string | null }[];
   accounts: { id: string; code: string; name: string }[];
   items: { id: string; sku: string; name: string; hsnSac: string | null; salePrice: number; purchasePrice: number; taxRateBps: number }[];
@@ -51,9 +80,21 @@ export function InvoiceForm({
 }) {
   const [partyId, setPartyId] = useState(defaultPartyId ?? "");
   const party = parties.find((p) => p.id === partyId);
-  const [pos, setPos] = useState(party?.stateCode ?? companyState);
-  const [lines, setLines] = useState<Line[]>([blank()]);
+  const initialSource = sourceInvoices.find((s) => s.id === defaultSourceId);
+  const [sourceId, setSourceId] = useState(initialSource?.id ?? "");
+  const [pos, setPos] = useState(initialSource?.placeOfSupply ?? party?.stateCode ?? companyState);
+  const [lines, setLines] = useState<Line[]>(initialSource ? fromSource(initialSource) : [blank()]);
   const sales = kind === "SALES";
+  const note = docType !== "INVOICE";
+  const partySources = sourceInvoices.filter((s) => s.partyId === partyId);
+  const pickSource = (id: string) => {
+    setSourceId(id);
+    const s = sourceInvoices.find((x) => x.id === id);
+    if (s) {
+      setPos(s.placeOfSupply);
+      setLines(fromSource(s));
+    }
+  };
   // Sales: supplier = us, place of supply = customer state. Purchases: supplier = vendor, place of supply = us.
   const supplierState = sales ? companyState : (party?.stateCode ?? companyState);
   const placeOfSupply = sales ? pos : companyState;
@@ -69,6 +110,8 @@ export function InvoiceForm({
 
   const payload = JSON.stringify({
     kind,
+    docType,
+    originalInvoiceId: note && sourceId ? sourceId : null,
     partyId,
     placeOfSupply,
     lines: lines
@@ -86,6 +129,7 @@ export function InvoiceForm({
           value={partyId}
           onChange={(e) => {
             setPartyId(e.target.value);
+            setSourceId("");
             const p = parties.find((x) => x.id === e.target.value);
             if (p?.stateCode) setPos(p.stateCode);
           }}
@@ -94,11 +138,25 @@ export function InvoiceForm({
           className="md:col-span-2"
           required
         />
-        <DateInputs today={today} />
+        <DateInputs today={today} note={note} />
+        {note && (
+          <>
+            <SelectField
+              label={`Against ${sales ? "invoice" : "bill"} (optional)`}
+              name="originalInvoiceId"
+              value={sourceId}
+              onChange={(e) => pickSource(e.target.value)}
+              placeholder={partyId ? (partySources.length ? "Choose… (copies its lines)" : "No invoices for this party") : "Choose the party first"}
+              options={partySources.map((s) => ({ value: s.id, label: `${s.number} · ${s.date} · ${formatINR(s.total)}` }))}
+              className="md:col-span-2"
+            />
+            <Field label="Reason" name="noteReason" placeholder={docType === "CREDIT_NOTE" ? "e.g. goods returned, discount" : "e.g. rate difference, extra charges"} required className="md:col-span-2" />
+          </>
+        )}
         {sales ? (
           <SelectField label="Place of supply" name="pos" value={pos} onChange={(e) => setPos(e.target.value)} options={Object.entries(GST_STATES).sort(([a], [b]) => a.localeCompare(b)).map(([v, l]) => ({ value: v, label: `${v} · ${l}` }))} />
         ) : (
-          <Field label="Supplier bill no." name="vendorRef" />
+          <Field label={note ? "Vendor's note no." : "Supplier bill no."} name="vendorRef" />
         )}
         <SelectField label="Project / cost centre" name="costCentreId" placeholder="—" options={costCentres.map((c) => ({ value: c.id, label: `${c.code} · ${c.name}` }))} />
         <div className="text-xs text-muted-foreground md:col-span-2 md:self-end">
@@ -212,17 +270,17 @@ export function InvoiceForm({
         </dl>
       </div>
       <div>
-        <SubmitButton>Post {sales ? "invoice" : "bill"}</SubmitButton>
+        <SubmitButton>Post {note ? docLabel(kind, docType, true).toLowerCase() : sales ? "invoice" : "bill"}</SubmitButton>
       </div>
     </ActionForm>
   );
 }
 
-function DateInputs({ today }: { today: string }) {
+function DateInputs({ today, note }: { today: string; note: boolean }) {
   return (
     <>
       <Field label="Date" name="date" type="date" defaultValue={today} required />
-      <Field label="Due date" name="dueDate" type="date" />
+      {note ? <span className="hidden md:block" /> : <Field label="Due date" name="dueDate" type="date" />}
     </>
   );
 }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { docLabel, docSign, statusLabel } from "@/lib/doc-types";
 import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { db } from "@/server/db";
@@ -112,16 +113,19 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
                         {i.number}
                       </Link>
                     </td>
-                    <td className={td}>{i.kind === "SALES" ? "Sales" : "Purchase"}</td>
+                    <td className={td}>
+                      {i.kind === "SALES" ? "Sales" : "Purchase"}
+                      {i.docType !== "INVOICE" && ` · ${docLabel(i.kind, i.docType, true).toLowerCase()}`}
+                    </td>
                     <td className={td}>{fmtDate(i.date)}</td>
                     <td className={td}>
-                      <Pill tone={i.status === "PAID" ? "green" : i.status === "VOID" ? "red" : "amber"}>{i.status}</Pill>
+                      <Pill tone={i.status === "PAID" ? "green" : i.status === "VOID" ? "red" : "amber"}>{statusLabel(i.docType, i.status)}</Pill>
                     </td>
                     <td className={tdNum}>
-                      <Money value={i.total} />
+                      <Money value={docSign(i.docType) * i.total} />
                     </td>
                     <td className={tdNum}>
-                      <Money value={i.status === "VOID" ? 0 : i.total - i.amountPaid} />
+                      <Money value={i.status === "VOID" ? 0 : docSign(i.docType) * (i.total - i.amountPaid)} />
                     </td>
                   </tr>
                 ))}

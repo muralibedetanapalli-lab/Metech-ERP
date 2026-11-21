@@ -5,6 +5,7 @@ import { db } from "@/server/db";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/lib/permissions";
 import { GST_STATES } from "@/lib/gst";
+import { docLabel, docSign, statusLabel } from "@/lib/doc-types";
 import { Money, PageHeader, Panel, Pill, T, fmtDate, statusTone, td, tdNum } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { ActionForm, SubmitButton } from "@/components/forms";
@@ -16,19 +17,36 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const user = await requireUser();
   const inv = await db.invoice.findUnique({
     where: { id },
-    include: { party: true, lines: { orderBy: { sortOrder: "asc" }, include: { account: { select: { code: true, name: true } } } }, allocations: { include: { payment: true } } },
+    include: {
+      party: true,
+      lines: { orderBy: { sortOrder: "asc" }, include: { account: { select: { code: true, name: true } } } },
+      allocations: { include: { payment: true } },
+      originalInvoice: { select: { id: true, number: true } },
+      adjustments: { orderBy: { date: "asc" }, select: { id: true, number: true, docType: true, date: true, total: true, amountPaid: true, status: true } },
+    },
   });
   if (!inv) notFound();
   const sales = inv.kind === "SALES";
   const writable = can(user.role, "accounting.write");
   const balance = inv.total - inv.amountPaid;
+  const credit = inv.docType === "CREDIT_NOTE";
+  const appliedNotes = inv.adjustments.filter((n) => n.docType === "CREDIT_NOTE" && n.status !== "VOID" && n.amountPaid > 0);
   return (
     <>
       <PageHeader
-        title={`${sales ? "Invoice" : "Bill"} ${inv.number}`}
+        title={`${docLabel(inv.kind, inv.docType)} ${inv.number}`}
         description={
           <span className="flex flex-wrap items-center gap-2">
-            <Pill tone={statusTone(inv.status)}>{inv.status === "POSTED" ? "UNPAID" : inv.status}</Pill>
+            <Pill tone={statusTone(inv.status)}>{statusLabel(inv.docType, inv.status)}</Pill>
+            {inv.originalInvoice && (
+              <>
+                against
+                <Link href={`/accounting/invoices/${inv.originalInvoice.id}`} className="text-primary hover:underline">
+                  {inv.originalInvoice.number}
+                </Link>
+                ·
+              </>
+            )}
             <Link href={`/crm/contacts/${inv.party.id}`} className="text-primary hover:underline">
               {inv.party.name}
             </Link>
@@ -42,7 +60,17 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
                 <FileDown /> PDF
               </a>
             </Button>
-            {writable && inv.status !== "VOID" && balance > 0 && (
+            {writable && inv.docType === "INVOICE" && inv.status !== "VOID" && (
+              <>
+                <Button variant="outline" asChild>
+                  <Link href={`/accounting/invoices/new?kind=${inv.kind}&doc=CREDIT_NOTE&from=${inv.id}`}>Credit note</Link>
+                </Button>
+                <Button variant="outline" asChild>
+                  <Link href={`/accounting/invoices/new?kind=${inv.kind}&doc=DEBIT_NOTE&from=${inv.id}`}>Debit note</Link>
+                </Button>
+              </>
+            )}
+            {writable && !credit && inv.status !== "VOID" && balance > 0 && (
               <Button asChild>
                 <Link href={`/accounting/payments?kind=${sales ? "RECEIPT" : "PAYMENT"}&partyId=${inv.party.id}&invoiceId=${inv.id}`}>{sales ? "Record receipt" : "Record payment"}</Link>
               </Button>
@@ -81,8 +109,22 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         ))}
       </T>
       <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <Panel title="Payments">
-          {inv.allocations.length === 0 ? (
+        <Panel title={credit ? "Set-off" : "Payments & credit"}>
+          {inv.noteReason && <p className="mb-3 text-sm">Reason: {inv.noteReason}</p>}
+          {credit ? (
+            <p className="text-sm text-muted-foreground">
+              {inv.amountPaid > 0 && inv.originalInvoice ? (
+                <>
+                  <Money value={inv.amountPaid} /> set off against {inv.originalInvoice.number}.{" "}
+                </>
+              ) : null}
+              {balance > 0 && inv.status !== "VOID" ? (
+                <>
+                  <Money value={balance} /> remains as open credit for {inv.party.name} (refund it with a payment / receipt, or keep it for the next invoice).
+                </>
+              ) : null}
+            </p>
+          ) : inv.allocations.length === 0 && appliedNotes.length === 0 ? (
             <p className="text-sm text-muted-foreground">No payments yet.</p>
           ) : (
             <ul className="grid gap-1 text-sm">
@@ -94,7 +136,33 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
                   <Money value={a.amount} />
                 </li>
               ))}
+              {appliedNotes.map((n) => (
+                <li key={n.id} className="flex justify-between">
+                  <Link href={`/accounting/invoices/${n.id}`} className="text-primary hover:underline">
+                    Credit note {n.number} · {fmtDate(n.date)}
+                  </Link>
+                  <Money value={n.amountPaid} />
+                </li>
+              ))}
             </ul>
+          )}
+          {inv.adjustments.length > 0 && (
+            <div className="mt-3 border-t pt-3 text-sm">
+              <div className="mb-1 font-medium">Credit / debit notes</div>
+              <ul className="grid gap-1">
+                {inv.adjustments.map((n) => (
+                  <li key={n.id} className="flex justify-between gap-2">
+                    <Link href={`/accounting/invoices/${n.id}`} className="text-primary hover:underline">
+                      {docLabel(inv.kind, n.docType, true)} {n.number}
+                    </Link>
+                    <span className="flex items-center gap-2">
+                      <Pill tone={statusTone(n.status)}>{statusLabel(n.docType, n.status)}</Pill>
+                      <Money value={docSign(n.docType) * n.total} />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
           {inv.notes && <p className="mt-3 border-t pt-3 text-sm whitespace-pre-wrap text-muted-foreground">{inv.notes}</p>}
         </Panel>
@@ -127,12 +195,12 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             <dd className="text-right font-semibold">
               <Money value={inv.total} />
             </dd>
-            <dt className="text-muted-foreground">Balance due</dt>
+            <dt className="text-muted-foreground">{credit ? "Open credit" : "Balance due"}</dt>
             <dd className="text-right">
               <Money value={inv.status === "VOID" ? 0 : balance} />
             </dd>
           </dl>
-          {writable && inv.status !== "VOID" && inv.allocations.length === 0 && (
+          {writable && inv.status !== "VOID" && inv.allocations.length === 0 && inv.adjustments.every((n) => n.status === "VOID") && (
             <ActionForm action={voidInvoiceAction} className="mt-4 flex gap-2 border-t pt-4">
               <input type="hidden" name="id" value={inv.id} />
               <Input name="reason" placeholder="Reason for voiding" required />

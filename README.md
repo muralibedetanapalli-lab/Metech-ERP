@@ -11,11 +11,23 @@ Stack (same as Dukaan Express): Next.js 16 (App Router, server actions, `proxy.t
 | Area | Screens |
 | --- | --- |
 | **CRM** | Contacts & companies (one `Party` table shared with accounting), leads, a deals pipeline (Kanban by stage), and activities: notes, calls, meetings, tasks and follow-up reminders with due dates. The dashboard shows tasks that are due. |
-| **Accounting** | Chart of accounts; a double-entry journal (manual, opening balances, void); GST sales invoices and purchase bills (CGST+SGST or IGST from the place of supply, with GSTIN validation, HSN/SAC and PDF invoices); receipts and payments allocated to invoices; expenses with input GST; bank reconciliation (CSV import, match or book); and account and party ledgers. |
-| **Reports** | Trial balance, profit & loss, balance sheet, GST summary, receivables and payables with ageing, and ledgers. Each one exports to Excel and PDF. |
+| **Accounting** | Chart of accounts; a double-entry journal (manual, opening balances, void); GST sales invoices and purchase bills (CGST+SGST or IGST from the place of supply, with GSTIN validation, HSN/SAC and PDF invoices); credit and debit notes on sales and purchases (see below); receipts and payments allocated to invoices; expenses with input GST; bank reconciliation (CSV import, match or book); and account and party ledgers. |
+| **Reports** | Trial balance, profit & loss, balance sheet, GST summary, receivables and payables with ageing, and ledgers. Each one exports to Excel and PDF. **GSTR-1** builds the month's return as a JSON file for the GST portal. |
 | **ERP** | Items and stock (purchases add stock, sales remove it, plus adjustments); a fixed-asset register with straight-line depreciation; employees and basic payroll (PF 12% of basic up to ₹15,000 and Telangana professional tax, posted to the books); and projects and cost centres showing income, cost and margin. |
 | **Dukaan sync** | Sync status, "Sync now", posting settings and run history. |
 | **Settings** | Company profile (printed on invoices) and users and roles. |
+
+### Credit and debit notes
+
+Notes live in the same table as invoices (`Invoice.docType` = `INVOICE`, `CREDIT_NOTE` or `DEBIT_NOTE`), each with its own number series: `CN/` and `DN/` for sales, `PCN/` and `PDN/` for notes received from vendors.
+
+- A **credit note** posts the invoice entry reversed: it reduces income (or expense), output (or input) GST and the receivable (or payable), and puts returned stock back. When it names the original invoice, it is set off against that invoice's balance straight away; anything left over stays as open credit for the party (a negative balance in receivables/payables), to refund with a payment or keep.
+- A **debit note** posts like an invoice and is paid like one.
+- A reason is required. An invoice with live notes cannot be voided until the notes are; voiding a credit note undoes its set-off.
+
+### GSTR-1
+
+**Reports → GSTR-1** builds the month's return from sales invoices and notes and downloads it as JSON in the GSTN layout: `b2b`, `b2cl` (inter-state B2C above ₹1,00,000), `b2cs` (other B2C, net of their notes), `cdnr`, `cdnur`, `hsn` (split `hsn_b2b` / `hsn_b2c`) and `doc_issue`. The screen lists what to fix first: missing company GSTIN, invalid customer GSTINs (reported as B2C), lines without HSN/SAC, negative B2CS rows, and any difference between the documents' tax and the ledger's output tax (for example GST on Dukaan commission, which is not invoiced here). The file has not been checked against the GST portal's validator, so review each table after upload.
 
 All money is stored as integer **paise**, and rates are stored in basis points. Every document posts a balanced journal entry, and every report reads only journal lines, so the trial balance always balances.
 
@@ -144,9 +156,8 @@ tests/unit, tests/integration  vitest (integration tests use TEST_DATABASE_URL)
 
 - Webhooks from Dukaan, for near-real-time sync instead of polling.
 - Pulling Cashfree settlement reports for automatic clearing-to-bank entries.
-- E-invoicing (IRN) and GSTR-1 JSON export.
+- E-invoicing (IRN) and GSTR-3B.
 - TDS on vendor payments.
-- Credit and debit notes.
 - Automatic depreciation postings.
 - Fuller payroll: TDS, ESI, payslip PDFs.
 - Email reminders for follow-ups.
