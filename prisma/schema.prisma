@@ -222,18 +222,34 @@ model Account {
   @@index([type])
 }
 
+/// A project (a business line such as Dukaan Express or TentOs) or a department / branch.
+/// Only PROJECT centres take a share of shared (untagged) costs in project costing.
 model CostCentre {
-  id        String    @id @default(cuid())
-  code      String    @unique
-  name      String
-  kind      String    @default("PROJECT") // PROJECT | DEPARTMENT | BRANCH
-  active    Boolean   @default(true)
-  budget    Int?
-  startDate DateTime?
-  endDate   DateTime?
-  createdAt DateTime  @default(now())
+  id          String    @id @default(cuid())
+  code        String    @unique
+  name        String
+  kind        String    @default("PROJECT") // PROJECT | DEPARTMENT | BRANCH
+  description String?
+  active      Boolean   @default(true)
+  budget      Int?
+  startDate   DateTime?
+  endDate     DateTime?
+  createdAt   DateTime  @default(now())
 
-  lines JournalLine[]
+  /// How this project's app sends data: null (manual only), "DUKAAN" (Dukaan Express feeds,
+  /// configured by DUKAAN_* env) or "FEED_V1" (the standard Metech project feed, see docs/PROJECT-FEED.md).
+  connector     String?
+  /// FEED_V1: base URL of the app's feed API and its service key (encrypted with SECRETS_KEY).
+  baseUrl       String?
+  apiKeyEnc     String?
+  /// Bank / cash account for payments and expenses the app sends.
+  bankAccountId String?
+  syncEnabled   Boolean   @default(false)
+  lastSyncAt    DateTime?
+
+  lines    JournalLine[]
+  invoices Invoice[]
+  syncRuns SyncRun[]
 }
 
 enum EntrySource {
@@ -333,6 +349,9 @@ model Invoice {
   amountPaid        Int            @default(0)
   notes             String?
   vendorRef         String? // supplier's bill number for purchases
+  /// Project the invoice belongs to (its income / cost lines are tagged with it too).
+  costCentreId      String?
+  costCentre        CostCentre?    @relation(fields: [costCentreId], references: [id], onDelete: SetNull)
   /// Credit / debit notes: the invoice they adjust (optional) and the reason printed on the note.
   originalInvoiceId String?
   originalInvoice   Invoice?       @relation("InvoiceNotes", fields: [originalInvoiceId], references: [id], onDelete: Restrict)
@@ -348,6 +367,7 @@ model Invoice {
   @@unique([kind, number])
   @@index([partyId])
   @@index([originalInvoiceId])
+  @@index([costCentreId])
   @@index([status, date])
 }
 
@@ -547,14 +567,28 @@ model SyncCursor {
 }
 
 model SyncRun {
-  id         String    @id @default(cuid())
+  id         String      @id @default(cuid())
+  projectId  String?
+  project    CostCentre? @relation(fields: [projectId], references: [id], onDelete: Cascade)
   trigger    String // MANUAL | CRON | WEBHOOK | CLI
-  startedAt  DateTime  @default(now())
+  startedAt  DateTime    @default(now())
   finishedAt DateTime?
-  ok         Boolean   @default(false)
-  parties    Int       @default(0)
-  events     Int       @default(0)
-  posted     Int       @default(0)
-  skipped    Int       @default(0)
+  ok         Boolean     @default(false)
+  parties    Int         @default(0)
+  events     Int         @default(0)
+  posted     Int         @default(0)
+  skipped    Int         @default(0)
   error      String?
+}
+
+/// Events already applied from a project's feed (one row per event id), so re-reading a feed never double-books.
+model SyncEvent {
+  projectId String
+  eventId   String
+  type      String
+  /// What the event created, e.g. "invoice:<id>", "payment:<id>", "expense:<id>"; null when it had no effect.
+  result    String?
+  createdAt DateTime @default(now())
+
+  @@id([projectId, eventId])
 }

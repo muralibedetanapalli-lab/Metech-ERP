@@ -1,11 +1,14 @@
 import "server-only";
 import { z } from "zod";
-import { db } from "@/server/db";
+import { db, type Tx } from "@/server/db";
 import { AppError } from "@/server/errors";
 import { computeInvoiceTotals } from "@/lib/gst";
 import { nextNumber, postEntry, voidEntry, type LineInput } from "./ledger";
 import { systemAccountId } from "./coa";
 import { docLabel, docPrefix, docSign } from "@/lib/doc-types";
+
+/** Run inside the caller's transaction when given one (e.g. a project sync), else in a new one. */
+const withTx = <T>(tx: Tx | undefined, fn: (tx: Tx) => Promise<T>) => (tx ? fn(tx) : db.$transaction(fn));
 
 // ───────────────────────────── Sales & purchase invoices ─────────────────────────────
 
@@ -44,9 +47,9 @@ export type InvoiceInput = z.input<typeof zInvoiceInput>;
  * A credit note posts the invoice entry reversed; when it names an original invoice, it is applied to that
  * invoice's balance straight away (up to what is still due) and any rest stays as open credit for the party.
  */
-export async function createInvoice(raw: InvoiceInput, userId?: string) {
+export async function createInvoice(raw: InvoiceInput, userId?: string, opts: { tx?: Tx; number?: string } = {}) {
   const input = zInvoiceInput.parse(raw);
-  return db.$transaction(async (tx) => {
+  return withTx(opts.tx, async (tx) => {
     const company = await tx.companySettings.upsert({ where: { id: "company" }, create: {}, update: {} });
     const party = await tx.party.findUniqueOrThrow({ where: { id: input.partyId } });
     const sales = input.kind === "SALES";
@@ -67,13 +70,17 @@ export async function createInvoice(raw: InvoiceInput, userId?: string) {
     }
 
     const defaultAccount = await systemAccountId(tx, sales ? "SALES" : "PURCHASES");
-    const number = await nextNumber(tx, docPrefix(input.kind, input.docType, company.invoicePrefix), input.date);
+    // A project app that issues its own GST invoices keeps its own numbers (its own series).
+    if (opts.number && (await tx.invoice.findUnique({ where: { kind_number: { kind: input.kind, number: opts.number } }, select: { id: true } })))
+      throw new AppError(409, "DUPLICATE_NUMBER", `Number ${opts.number} is already used`);
+    const number = opts.number ?? (await nextNumber(tx, docPrefix(input.kind, input.docType, company.invoicePrefix), input.date));
     const invoice = await tx.invoice.create({
       data: {
         kind: input.kind,
         docType: input.docType,
         originalInvoiceId: original?.id ?? null,
         noteReason: note ? input.noteReason : null,
+        costCentreId: input.costCentreId || null,
         number,
         partyId: party.id,
         date: input.date,
@@ -151,8 +158,8 @@ export async function createInvoice(raw: InvoiceInput, userId?: string) {
   });
 }
 
-export async function voidInvoice(invoiceId: string, reason: string) {
-  return db.$transaction(async (tx) => {
+export async function voidInvoice(invoiceId: string, reason: string, txIn?: Tx) {
+  return withTx(txIn, async (tx) => {
     const inv = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { allocations: true, lines: true, adjustments: { where: { status: { not: "VOID" } } } } });
     if (inv.status === "VOID") return inv;
     if (inv.allocations.length) throw new AppError(409, "HAS_PAYMENTS", "Void the payments against this invoice first");
@@ -197,9 +204,9 @@ export type PaymentInput = z.input<typeof zPaymentInput>;
  * Receipt: Dr bank / Cr receivable (party). Payment: Dr payable (party) / Cr bank.
  * Allocations mark invoices PARTIAL or PAID; any unallocated amount stays on the party as an advance.
  */
-export async function recordPayment(raw: PaymentInput, userId?: string) {
+export async function recordPayment(raw: PaymentInput, userId?: string, txIn?: Tx) {
   const input = zPaymentInput.parse(raw);
-  return db.$transaction(async (tx) => {
+  return withTx(txIn, async (tx) => {
     const receipt = input.kind === "RECEIPT";
     if (!input.partyId && !input.counterAccountId) throw new AppError(400, "NO_COUNTERPARTY", "Choose a party or a counter account");
     const allocated = input.allocations.reduce((s, a) => s + a.amount, 0);
@@ -263,12 +270,12 @@ export const zExpenseInput = z.object({
   description: z.string().trim().min(1).max(300),
   reference: z.string().trim().max(80).optional().nullable(),
 });
-export type ExpenseInput = z.infer<typeof zExpenseInput>;
+export type ExpenseInput = z.input<typeof zExpenseInput>;
 
 /** Dr expense (+ input GST) / Cr bank or cash. */
-export async function recordExpense(raw: ExpenseInput, userId?: string) {
+export async function recordExpense(raw: ExpenseInput, userId?: string, txIn?: Tx) {
   const input = zExpenseInput.parse(raw);
-  return db.$transaction(async (tx) => {
+  return withTx(txIn, async (tx) => {
     const gst = Math.round((input.amount * input.gstRateBps) / 10_000);
     const half = Math.floor(gst / 2);
     const expense = await tx.expense.create({

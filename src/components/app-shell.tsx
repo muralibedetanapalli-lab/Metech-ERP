@@ -60,7 +60,7 @@ const NAV: { section: string; items: { href: string; label: string; icon: React.
       { href: "/erp/items", label: "Items & inventory", icon: Boxes },
       { href: "/erp/assets", label: "Fixed assets", icon: Building2 },
       { href: "/erp/employees", label: "Employees & payroll", icon: UserRound },
-      { href: "/erp/projects", label: "Projects & cost centres", icon: Briefcase },
+      { href: "/erp/projects", label: "Projects", icon: Briefcase },
     ],
   },
   {

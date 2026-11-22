@@ -3,6 +3,7 @@ import { docLabel, docSign } from "@/lib/doc-types";
 import { db } from "@/server/db";
 import type { AccountType } from "@/generated/prisma/client";
 import { isDebitNormal } from "./coa";
+import { projectCosting } from "@/server/projects/costing";
 
 /** Column spec shared by on-screen tables and Excel/PDF exports. Money values are paise. */
 export interface Column {
@@ -193,7 +194,7 @@ export async function outstanding(kind: "SALES" | "PURCHASE", asOf = new Date())
 
 // ───────────────────────────── Report registry (screens + exports) ─────────────────────────────
 
-export const REPORT_TYPES = ["trial-balance", "profit-loss", "balance-sheet", "gst-summary", "receivables", "payables"] as const;
+export const REPORT_TYPES = ["trial-balance", "profit-loss", "balance-sheet", "gst-summary", "receivables", "payables", "project-costing"] as const;
 export type ReportType = (typeof REPORT_TYPES)[number];
 
 export const REPORT_TITLES: Record<ReportType, string> = {
@@ -203,6 +204,7 @@ export const REPORT_TITLES: Record<ReportType, string> = {
   "gst-summary": "GST summary",
   receivables: "Receivables (debtors)",
   payables: "Payables (creditors)",
+  "project-costing": "Project costing",
 };
 
 /** Build any report as a flat table for screens and Excel/PDF export. */
@@ -268,6 +270,28 @@ export async function buildReport(type: ReportType, from: Date, to: Date): Promi
           { date: "", type: "Output tax (ledger)", number: "", party: "", gstin: "", pos: "", taxable: null, cgst: g.outward.cgst, sgst: g.outward.sgst, igst: g.outward.igst, total: g.outTotal },
           { date: "", type: "Input tax credit (ledger)", number: "", party: "", gstin: "", pos: "", taxable: null, cgst: g.input.cgst, sgst: g.input.sgst, igst: g.input.igst, total: g.inTotal },
           { date: "", type: "Net GST payable", number: "", party: "", gstin: "", pos: "", taxable: null, cgst: null, sgst: null, igst: null, total: g.netPayable },
+        ],
+      };
+    }
+    case "project-costing": {
+      const c = await projectCosting(from, to);
+      const pct = (bps: number) => `${(bps / 100).toFixed(1)}%`;
+      const margin = (r: { revenue: number; profit: number }) => (r.revenue > 0 ? `${((r.profit * 100) / r.revenue).toFixed(1)}%` : "—");
+      const sum = (k: "revenue" | "directCost" | "sharedCost" | "totalCost" | "profit") => c.rows.reduce((s, r) => s + r[k], 0);
+      const totalRev = sum("revenue");
+      const totalProfit = sum("profit");
+      return {
+        title: REPORT_TITLES[type],
+        subtitle: `${period} · shared costs split by revenue share`,
+        columns: [
+          { key: "code", label: "Code" }, { key: "name", label: "Project" }, { key: "revenue", label: "Revenue", money: true }, { key: "directCost", label: "Direct cost", money: true },
+          { key: "share", label: "Share" }, { key: "sharedCost", label: "Shared cost", money: true }, { key: "totalCost", label: "Total cost", money: true }, { key: "profit", label: "Profit", money: true }, { key: "margin", label: "Margin" },
+        ],
+        rows: c.rows.map((r) => ({ code: r.code, name: r.name, revenue: r.revenue, directCost: r.directCost, share: pct(r.shareBps), sharedCost: r.sharedCost, totalCost: r.totalCost, profit: r.profit, margin: margin(r) })),
+        totals: [
+          { code: "", name: "All projects", revenue: totalRev, directCost: sum("directCost"), share: "", sharedCost: sum("sharedCost"), totalCost: sum("totalCost"), profit: totalProfit, margin: margin({ revenue: totalRev, profit: totalProfit }) },
+          { code: "", name: "Shared costs in period", revenue: null, directCost: null, share: "", sharedCost: c.sharedCost, totalCost: null, profit: null, margin: c.unallocated ? "not split: no project revenue" : "" },
+          { code: "", name: "Income not tagged to a project", revenue: c.untaggedIncome, directCost: null, share: "", sharedCost: null, totalCost: null, profit: null, margin: "" },
         ],
       };
     }

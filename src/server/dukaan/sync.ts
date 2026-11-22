@@ -6,6 +6,7 @@ import { postEntry } from "@/server/accounting/ledger";
 import { systemAccountId } from "@/server/accounting/coa";
 import type { DukaanEvent, DukaanParty, DukaanPartyType, FeedPage } from "./contract";
 import { mapEvent, sourceRefFor } from "./mapping";
+import { dukaanProject } from "@/server/projects/dukaan-project";
 
 const SOURCE = "DUKAAN";
 const PAGE_SIZE = 200;
@@ -94,9 +95,10 @@ async function partyId(tx: Tx, type: DukaanPartyType, id: string) {
   return created.id;
 }
 
-/** Post one event in its own transaction. Returns "posted" | "skipped" | "duplicate". */
-export async function postDukaanEvent(e: DukaanEvent): Promise<"posted" | "skipped" | "duplicate"> {
+/** Post one event in its own transaction, tagged with the Dukaan project. Returns "posted" | "skipped" | "duplicate". */
+export async function postDukaanEvent(e: DukaanEvent, projectId?: string): Promise<"posted" | "skipped" | "duplicate"> {
   return db.$transaction(async (tx) => {
+    const project = projectId ?? (await dukaanProject(tx)).id;
     const ref = sourceRefFor(e);
     if (await tx.journalEntry.findUnique({ where: { sourceRef: ref }, select: { id: true } })) return "duplicate";
     const company = await tx.companySettings.upsert({ where: { id: "company" }, create: {}, update: {} });
@@ -121,7 +123,8 @@ export async function postDukaanEvent(e: DukaanEvent): Promise<"posted" | "skipp
       orderPosted: () => orderPosted,
     });
     if (!mapped) return "skipped";
-    const { created } = await postEntry(tx, { ...mapped, source: "DUKAAN" });
+    const lines = mapped.lines.map((l) => ({ ...l, costCentreId: l.costCentreId ?? project }));
+    const { created } = await postEntry(tx, { ...mapped, lines, source: "DUKAAN" });
     return created ? "posted" : "duplicate";
   });
 }
@@ -142,9 +145,10 @@ export interface SyncResult {
  */
 export async function runDukaanSync(trigger: "MANUAL" | "CRON" | "CLI" | "TEST", fetcher: Fetcher = httpFetcher): Promise<SyncResult> {
   // Pooled connections make session advisory locks unreliable, so an unfinished recent run acts as the lock.
-  const running = await db.syncRun.findFirst({ where: { finishedAt: null, startedAt: { gt: new Date(Date.now() - 15 * 60_000) } } });
+  const project = await dukaanProject();
+  const running = await db.syncRun.findFirst({ where: { projectId: project.id, finishedAt: null, startedAt: { gt: new Date(Date.now() - 15 * 60_000) } } });
   if (running) throw new Error("A Dukaan sync is already running");
-  const run = await db.syncRun.create({ data: { trigger } });
+  const run = await db.syncRun.create({ data: { trigger, projectId: project.id } });
   const result: SyncResult = { runId: run.id, ok: false, parties: 0, events: 0, posted: 0, skipped: 0 };
   try {
     // 1. Parties → CRM contacts and companies
@@ -165,7 +169,7 @@ export async function runDukaanSync(trigger: "MANUAL" | "CRON" | "CLI" | "TEST",
     for (let i = 0; i < MAX_PAGES; i++) {
       const page = (await fetcher(`/api/v1/integrations/erp/events?limit=${PAGE_SIZE}${cursor ? `&after=${encodeURIComponent(cursor)}` : ""}`)) as FeedPage<DukaanEvent>;
       for (const e of page.items) {
-        const r = await postDukaanEvent(e);
+        const r = await postDukaanEvent(e, project.id);
         result.events++;
         if (r === "posted") result.posted++;
         else result.skipped++;
@@ -177,6 +181,7 @@ export async function runDukaanSync(trigger: "MANUAL" | "CRON" | "CLI" | "TEST",
       if (!page.hasMore) break;
     }
     result.ok = true;
+    await db.costCentre.update({ where: { id: project.id }, data: { lastSyncAt: new Date() } });
   } catch (err) {
     result.error = err instanceof Error ? err.message : String(err);
   } finally {

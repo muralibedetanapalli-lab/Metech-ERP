@@ -6,3 +6,4 @@ process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 process.env.DUKAAN_BASE_URL = "";
 process.env.DUKAAN_API_KEY = "";
 process.env.JWT_SECRET ||= "test-secret-test-secret-test-secret-123456";
+process.env.SECRETS_KEY ||= "test-secrets-key-test-secrets-key-123456";

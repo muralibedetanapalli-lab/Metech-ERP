@@ -12,6 +12,7 @@ const DESCRIPTIONS: Record<string, string> = {
   "gst-summary": "Outward and inward supplies with CGST/SGST/IGST and net GST payable.",
   receivables: "Unpaid sales invoices with ageing.",
   payables: "Unpaid purchase bills with ageing.",
+  "project-costing": "Revenue, direct cost, share of shared costs and profit for each project.",
 };
 
 export default async function ReportsPage() {

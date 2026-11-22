@@ -13,7 +13,8 @@ Stack (same as Dukaan Express): Next.js 16 (App Router, server actions, `proxy.t
 | **CRM** | Contacts & companies (one `Party` table shared with accounting), leads, a deals pipeline (Kanban by stage), and activities: notes, calls, meetings, tasks and follow-up reminders with due dates. The dashboard shows tasks that are due. |
 | **Accounting** | Chart of accounts; a double-entry journal (manual, opening balances, void); GST sales invoices and purchase bills (CGST+SGST or IGST from the place of supply, with GSTIN validation, HSN/SAC and PDF invoices); credit and debit notes on sales and purchases (see below); receipts and payments allocated to invoices; expenses with input GST; bank reconciliation (CSV import, match or book); and account and party ledgers. |
 | **Reports** | Trial balance, profit & loss, balance sheet, GST summary, receivables and payables with ageing, and ledgers. Each one exports to Excel and PDF. **GSTR-1** builds the month's return as a JSON file for the GST portal. |
-| **ERP** | Items and stock (purchases add stock, sales remove it, plus adjustments); a fixed-asset register with straight-line depreciation; employees and basic payroll (PF 12% of basic up to ₹15,000 and Telangana professional tax, posted to the books); and projects and cost centres showing income, cost and margin. |
+| **ERP** | Items and stock (purchases add stock, sales remove it, plus adjustments); a fixed-asset register with straight-line depreciation; employees and basic payroll (PF 12% of basic up to ₹15,000 and Telangana professional tax, posted to the books); and departments / branches as cost centres. |
+| **Projects** | Each business line (Dukaan Express, TentOs, …) is a project. Invoices, bills, expenses and synced postings are tagged with it; **project costing** shows revenue, direct cost, a revenue-share of shared company costs, overall cost and profit per project. A project's app can sync automatically (Dukaan's own feed, or the standard **project feed**, `docs/PROJECT-FEED.md`). |
 | **Dukaan sync** | Sync status, "Sync now", posting settings and run history. |
 | **Settings** | Company profile (printed on invoices) and users and roles. |
 
@@ -49,7 +50,7 @@ The app needs Node 22 or later and PostgreSQL. On this machine, the Dukaan dev c
 ```bash
 cd D:\Personal\Metech-ERP
 npm install
-copy .env.example .env      # then fill JWT_SECRET, DUKAAN_API_KEY, CRON_SECRET (random 48-byte strings)
+copy .env.example .env      # then fill JWT_SECRET, SECRETS_KEY, DUKAAN_API_KEY, CRON_SECRET (random 48-byte strings)
 ```
 
 Create the databases once:
@@ -74,6 +75,22 @@ npm run typecheck
 npm run lint
 npm run build
 ```
+
+## Projects and project apps
+
+- **Projects:** they are cost centres of kind *project*. The migration creates **Dukaan Express** (code `DUKAAN`, connector `DUKAAN`) and tags all past Dukaan postings with it. Add more projects (e.g. `TENTOS`) under **Projects**.
+- **Departments and branches:** their costs count as shared costs.
+- **Project costing** (**Reports → Project costing**, and the **Projects** page) works per period:
+  - *Revenue* and *direct cost* come from journal lines tagged with the project.
+  - *Shared costs* are untagged expenses plus department / branch costs. They are split across projects by revenue share, using exact paise so the parts add up.
+  - *Overall cost* is direct cost plus the shared share. *Profit* is revenue minus overall cost.
+  - Projects with no revenue take no share. If no project has revenue, shared costs stay unsplit and are shown as such.
+- **App sync:**
+  - A project's app connects with the **Metech project feed v1** (`docs/PROJECT-FEED.md`): two read-only endpoints, `parties` and `events`, behind a service key.
+  - The project page stores the URL and the key. The key is encrypted with `SECRETS_KEY`.
+  - Sales invoices and notes keep the app's own numbers, so they appear in GSTR-1 as issued. Bills, payments and expenses are booked to the project's bank account.
+  - Each event id is applied once (table `SyncEvent`). A run stops at the first event that can't be applied, and the next run retries from there.
+- **Scheduled sync:** `POST /api/integrations/sync` (or the older `/api/integrations/dukaan/sync`) with `Authorization: Bearer $CRON_SECRET` syncs every active project that has a connector and scheduled sync switched on.
 
 ## Dukaan Express integration
 
@@ -135,7 +152,7 @@ To connect the two apps locally:
 
 ## Deploying (planned: same Azure account as Dukaan)
 
-The `Dockerfile` follows Dukaan's: a standalone Next.js server, and `prisma migrate deploy` on start-up (`RUN_MIGRATIONS=false` turns it off). The suggested setup is a new Container App plus a new database on Dukaan's existing Azure Postgres server, with these secrets: `DATABASE_URL`, `JWT_SECRET`, `DUKAAN_BASE_URL`, `DUKAAN_API_KEY` and `CRON_SECRET`. Dukaan's Container App then gets `ERP_API_KEY` and `ERP_URL`. Nothing has been created in Azure yet; that needs approval first.
+The `Dockerfile` follows Dukaan's: a standalone Next.js server, and `prisma migrate deploy` on start-up (`RUN_MIGRATIONS=false` turns it off). The suggested setup is a new Container App plus a new database on Dukaan's existing Azure Postgres server, with these secrets: `DATABASE_URL`, `JWT_SECRET`, `SECRETS_KEY`, `DUKAAN_BASE_URL`, `DUKAAN_API_KEY` and `CRON_SECRET`. Dukaan's Container App then gets `ERP_API_KEY` and `ERP_URL`. Nothing has been created in Azure yet; that needs approval first.
 
 ## Project layout
 

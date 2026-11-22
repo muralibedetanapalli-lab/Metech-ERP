@@ -27,9 +27,9 @@ export default async function DukaanPage() {
   const e = env();
   const configured = dukaanConfigured();
   const [runs, counts, cursors, company, banks, sums, entries] = await Promise.all([
-    db.syncRun.findMany({ orderBy: { startedAt: "desc" }, take: 10 }),
+    db.syncRun.findMany({ where: { project: { connector: "DUKAAN" } }, orderBy: { startedAt: "desc" }, take: 10 }),
     db.party.groupBy({ by: ["extType"], where: { extSource: "DUKAAN" }, _count: true }),
-    db.syncCursor.findMany(),
+    db.syncCursor.findMany({ where: { feed: { in: ["parties", "events"] } } }),
     db.companySettings.upsert({ where: { id: "company" }, create: {}, update: {} }),
     lookups.bankAccounts(),
     accountSums({}),

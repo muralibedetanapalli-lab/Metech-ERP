@@ -22,6 +22,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
       lines: { orderBy: { sortOrder: "asc" }, include: { account: { select: { code: true, name: true } } } },
       allocations: { include: { payment: true } },
       originalInvoice: { select: { id: true, number: true } },
+      costCentre: { select: { id: true, code: true, name: true } },
       adjustments: { orderBy: { date: "asc" }, select: { id: true, number: true, docType: true, date: true, total: true, amountPaid: true, status: true } },
     },
   });
@@ -51,6 +52,14 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
               {inv.party.name}
             </Link>
             · {fmtDate(inv.date)} · place of supply {inv.placeOfSupply} {GST_STATES[inv.placeOfSupply]}
+            {inv.costCentre && (
+              <>
+                ·{" "}
+                <Link href={`/erp/projects/${inv.costCentre.id}`} className="text-primary hover:underline">
+                  {inv.costCentre.name}
+                </Link>
+              </>
+            )}
           </span>
         }
         actions={
