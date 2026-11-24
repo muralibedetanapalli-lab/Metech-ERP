@@ -119,7 +119,7 @@ export async function saveCostCentre(_p: ActionState, fd: FormData): Promise<Act
       data: {
         code: req(fd, "code", "Code").toUpperCase(),
         name: req(fd, "name", "Name"),
-        kind: str(fd, "kind") ?? "PROJECT",
+        kind: ["PROJECT", "DEPARTMENT", "BRANCH"].includes(str(fd, "kind") ?? "") ? str(fd, "kind")! : "PROJECT",
         budget: str(fd, "budget") ? parseRupees(fd.get("budget")) : null,
         startDate: start ? dayDate(start) : null,
         endDate: end ? dayDate(end) : null,

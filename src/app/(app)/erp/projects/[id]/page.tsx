@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { COMMON_KIND } from "@/lib/cost-centres";
 import { notFound } from "next/navigation";
 import { db } from "@/server/db";
 import { requireUser } from "@/server/auth/session";
@@ -232,7 +233,11 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             <ActionForm key={`${p.name}|${p.kind}|${p.active}|${p.budget}|${p.description}|${p.startDate?.getTime()}|${p.endDate?.getTime()}`} action={updateProject} resetOnSuccess={false} className="grid gap-3 md:grid-cols-3">
               <input type="hidden" name="id" value={p.id} />
               <Field label="Name" name="name" defaultValue={p.name} required className="md:col-span-2" />
-              <SelectField label="Kind" name="kind" defaultValue={p.kind} options={["PROJECT", "DEPARTMENT", "BRANCH"].map((k) => ({ value: k, label: k.toLowerCase() }))} />
+              {p.kind === COMMON_KIND ? (
+                <input type="hidden" name="kind" value={COMMON_KIND} />
+              ) : (
+                <SelectField label="Kind" name="kind" defaultValue={p.kind} options={["PROJECT", "DEPARTMENT", "BRANCH"].map((k) => ({ value: k, label: k.toLowerCase() }))} />
+              )}
               <TextareaField label="Description" name="description" defaultValue={p.description ?? ""} className="md:col-span-3" />
               <Field label="Budget (₹)" name="budget" inputMode="decimal" defaultValue={p.budget ? String(p.budget / 100) : ""} />
               <Field label="Start" name="startDate" type="date" defaultValue={p.startDate ? isoDate(p.startDate) : ""} />

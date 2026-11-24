@@ -272,27 +272,67 @@ export const zExpenseInput = z.object({
 });
 export type ExpenseInput = z.input<typeof zExpenseInput>;
 
+type ParsedExpense = z.output<typeof zExpenseInput>;
+
+const expenseGst = (input: ParsedExpense) => Math.round((input.amount * input.gstRateBps) / 10_000);
+
+/** Dr expense (+ input GST) / Cr bank or cash, for one expense row. */
+async function postExpenseEntry(tx: Tx, expenseId: string, input: ParsedExpense, userId?: string) {
+  const gst = expenseGst(input);
+  const half = Math.floor(gst / 2);
+  const { entry } = await postEntry(tx, {
+    date: input.date,
+    narration: `Expense — ${input.description}`,
+    source: "EXPENSE",
+    sourceRef: `expense:${expenseId}`,
+    createdById: userId,
+    lines: [
+      { accountId: input.accountId, amount: input.amount, partyId: input.partyId || null, costCentreId: input.costCentreId || null, memo: input.description },
+      ...(input.interState ? [{ key: "INPUT_IGST" as const, amount: gst }] : [{ key: "INPUT_CGST" as const, amount: half }, { key: "INPUT_SGST" as const, amount: gst - half }]),
+      { accountId: input.paidFromId, amount: -(input.amount + gst), memo: input.reference ?? null },
+    ],
+  });
+  return entry;
+}
+
+const expenseData = (input: ParsedExpense) => ({
+  ...input,
+  partyId: input.partyId || null,
+  costCentreId: input.costCentreId || null,
+  gstAmount: expenseGst(input),
+  reference: input.reference ?? null,
+});
+
 /** Dr expense (+ input GST) / Cr bank or cash. */
 export async function recordExpense(raw: ExpenseInput, userId?: string, txIn?: Tx) {
   const input = zExpenseInput.parse(raw);
   return withTx(txIn, async (tx) => {
-    const gst = Math.round((input.amount * input.gstRateBps) / 10_000);
-    const half = Math.floor(gst / 2);
-    const expense = await tx.expense.create({
-      data: { ...input, partyId: input.partyId || null, costCentreId: input.costCentreId || null, gstAmount: gst, reference: input.reference ?? null },
-    });
-    const { entry } = await postEntry(tx, {
-      date: input.date,
-      narration: `Expense — ${input.description}`,
-      source: "EXPENSE",
-      sourceRef: `expense:${expense.id}`,
-      createdById: userId,
-      lines: [
-        { accountId: input.accountId, amount: input.amount, partyId: input.partyId || null, costCentreId: input.costCentreId || null, memo: input.description },
-        ...(input.interState ? [{ key: "INPUT_IGST" as const, amount: gst }] : [{ key: "INPUT_CGST" as const, amount: half }, { key: "INPUT_SGST" as const, amount: gst - half }]),
-        { accountId: input.paidFromId, amount: -(input.amount + gst), memo: input.reference ?? null },
-      ],
-    });
+    const expense = await tx.expense.create({ data: expenseData(input) });
+    const entry = await postExpenseEntry(tx, expense.id, input, userId);
     return tx.expense.update({ where: { id: expense.id }, data: { journalEntryId: entry.id } });
+  });
+}
+
+/**
+ * Change an expense. Its old journal entry is voided (kept for the audit trail) and a corrected one is posted.
+ * Expenses that came from a project app's feed must be changed in that app; a renewal linked to the expense
+ * gets the new amount.
+ */
+export async function updateExpense(id: string, raw: ExpenseInput, userId?: string, txIn?: Tx) {
+  const input = zExpenseInput.parse(raw);
+  return withTx(txIn, async (tx) => {
+    const current = await tx.expense.findUnique({ where: { id } });
+    if (!current) throw new AppError(404, "NOT_FOUND", "Expense not found");
+    const synced = await tx.syncEvent.findFirst({ where: { result: `expense:${id}` }, select: { projectId: true } });
+    if (synced) throw new AppError(409, "SYNCED", "This expense came from a project app's feed; change it in that app");
+    if (current.journalEntryId) {
+      await voidEntry(tx, current.journalEntryId, "Expense edited");
+      // Free the expense's source reference for the corrected entry; the voided one keeps a dated copy.
+      await tx.journalEntry.update({ where: { id: current.journalEntryId }, data: { sourceRef: `expense:${id}:edited:${Date.now()}` } });
+    }
+    const entry = await postExpenseEntry(tx, id, input, userId);
+    const expense = await tx.expense.update({ where: { id }, data: { ...expenseData(input), journalEntryId: entry.id } });
+    await tx.renewalEvent.updateMany({ where: { expenseId: id }, data: { amount: expense.amount, gstAmount: expense.gstAmount } });
+    return expense;
   });
 }

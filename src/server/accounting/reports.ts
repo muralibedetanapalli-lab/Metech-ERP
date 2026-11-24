@@ -293,6 +293,9 @@ export async function buildReport(type: ReportType, from: Date, to: Date): Promi
         totals: [
           { code: "", name: "All projects", revenue: totalRev, directCost: sum("directCost"), share: "", sharedCost: sum("sharedCost"), totalCost: sum("totalCost"), profit: totalProfit, margin: margin({ revenue: totalRev, profit: totalProfit }) },
           { code: "", name: "Shared costs in period", revenue: null, directCost: null, share: "", sharedCost: c.sharedCost, totalCost: null, profit: null, margin: c.unallocated ? "not split: no project revenue" : "" },
+          { code: "", name: "  of which marked Common", revenue: null, directCost: null, share: "", sharedCost: c.sharedBreakdown.common, totalCost: null, profit: null, margin: "" },
+          { code: "", name: "  of which departments & branches", revenue: null, directCost: null, share: "", sharedCost: c.sharedBreakdown.departments, totalCost: null, profit: null, margin: "" },
+          { code: "", name: "  of which not tagged", revenue: null, directCost: null, share: "", sharedCost: c.sharedBreakdown.untagged, totalCost: null, profit: null, margin: c.sharedBreakdown.untagged ? "tag these as Common or a project" : "" },
           { code: "", name: "Income not tagged to a project", revenue: c.untaggedIncome, directCost: null, share: "", sharedCost: null, totalCost: null, profit: null, margin: "" },
         ],
       };

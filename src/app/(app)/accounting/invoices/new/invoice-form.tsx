@@ -1,5 +1,6 @@
 "use client";
 
+import { centreOptions } from "@/lib/cost-centres";
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { ActionForm, Field, NativeSelect, SelectField, SubmitButton } from "@/components/forms";
@@ -73,7 +74,7 @@ export function InvoiceForm({
   parties: { id: string; name: string; stateCode: string | null; gstin: string | null }[];
   accounts: { id: string; code: string; name: string }[];
   items: { id: string; sku: string; name: string; hsnSac: string | null; salePrice: number; purchasePrice: number; taxRateBps: number }[];
-  costCentres: { id: string; code: string; name: string }[];
+  costCentres: { id: string; code: string; name: string; kind: string }[];
   companyState: string;
   today: string;
   defaultPartyId?: string;
@@ -158,7 +159,7 @@ export function InvoiceForm({
         ) : (
           <Field label={note ? "Vendor's note no." : "Supplier bill no."} name="vendorRef" />
         )}
-        <SelectField label="Project / cost centre" name="costCentreId" placeholder="—" options={costCentres.map((c) => ({ value: c.id, label: `${c.code} · ${c.name}` }))} />
+        <SelectField label="Project / cost centre" name="costCentreId" placeholder="—" options={centreOptions(costCentres, { common: kind === "PURCHASE" })} />
         <div className="text-xs text-muted-foreground md:col-span-2 md:self-end">
           {totals.interState ? "Inter-state supply: IGST applies." : "Intra-state supply: CGST + SGST apply."}
         </div>

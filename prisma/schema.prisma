@@ -224,12 +224,13 @@ model Account {
 }
 
 /// A project (a business line such as Dukaan Express or TentOs) or a department / branch.
-/// Only PROJECT centres take a share of shared (untagged) costs in project costing.
+/// Only PROJECT centres take a share of shared costs in project costing. The built-in COMMON centre (kind COMMON)
+/// marks costs shared by all projects.
 model CostCentre {
   id          String    @id @default(cuid())
   code        String    @unique
   name        String
-  kind        String    @default("PROJECT") // PROJECT | DEPARTMENT | BRANCH
+  kind        String    @default("PROJECT") // PROJECT | DEPARTMENT | BRANCH | COMMON
   description String?
   active      Boolean   @default(true)
   budget      Int?

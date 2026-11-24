@@ -7,7 +7,7 @@ import { db } from "@/server/db";
 import { requirePermission } from "@/server/auth/session";
 import { req, run, str } from "@/server/action";
 import { AppError } from "@/server/errors";
-import { createInvoice, recordExpense, recordPayment, voidInvoice } from "@/server/accounting/documents";
+import { createInvoice, recordExpense, recordPayment, updateExpense, voidInvoice } from "@/server/accounting/documents";
 import { post, voidEntry } from "@/server/accounting/ledger";
 import { parseRupees } from "@/lib/money";
 import { dayDate } from "@/lib/dates";
@@ -65,26 +65,34 @@ export async function savePayment(_p: ActionState, fd: FormData): Promise<Action
   }, ACC_PATHS);
 }
 
+const expenseForm = (fd: FormData) => ({
+  date: dayDate(req(fd, "date", "Date")),
+  accountId: req(fd, "accountId", "Expense account"),
+  paidFromId: req(fd, "paidFromId", "Paid from"),
+  partyId: str(fd, "partyId"),
+  costCentreId: str(fd, "costCentreId"),
+  amount: parseRupees(fd.get("amount")),
+  gstRateBps: Number(str(fd, "gstRateBps") ?? 0),
+  interState: fd.get("interState") === "on",
+  description: req(fd, "description", "Description"),
+  reference: str(fd, "reference"),
+});
+
 export async function saveExpense(_p: ActionState, fd: FormData): Promise<ActionState> {
   return run(async () => {
     const user = await requirePermission("accounting.write");
-    await recordExpense(
-      {
-        date: dayDate(req(fd, "date", "Date")),
-        accountId: req(fd, "accountId", "Expense account"),
-        paidFromId: req(fd, "paidFromId", "Paid from"),
-        partyId: str(fd, "partyId"),
-        costCentreId: str(fd, "costCentreId"),
-        amount: parseRupees(fd.get("amount")),
-        gstRateBps: Number(str(fd, "gstRateBps") ?? 0),
-        interState: fd.get("interState") === "on",
-        description: req(fd, "description", "Description"),
-        reference: str(fd, "reference"),
-      },
-      user.id,
-    );
+    await recordExpense(expenseForm(fd), user.id);
     return "Expense recorded";
   }, ACC_PATHS);
+}
+
+export async function editExpense(_p: ActionState, fd: FormData): Promise<ActionState> {
+  const id = req(fd, "id");
+  return run(async () => {
+    const user = await requirePermission("accounting.write");
+    await updateExpense(id, expenseForm(fd), user.id);
+    return "Expense updated: the old journal entry was voided and a corrected one posted";
+  }, [...ACC_PATHS, `/accounting/expenses/${id}`, "/erp/renewals", "/erp/projects"]);
 }
 
 const zJournal = z.object({

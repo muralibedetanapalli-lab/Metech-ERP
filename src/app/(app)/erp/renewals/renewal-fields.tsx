@@ -1,4 +1,5 @@
 import { CYCLES, RENEWAL_CATEGORIES } from "@/lib/renewals";
+import { centreOptions } from "@/lib/cost-centres";
 import { GST_RATES_BPS } from "@/lib/gst";
 import { Field, SelectField, TextareaField } from "@/components/forms";
 
@@ -34,7 +35,7 @@ export function RenewalFields({ d = {}, vendors, projects, accounts }: { d?: Ren
       <SelectField label="Renews" name="cycleMonths" defaultValue={String(d.cycleMonths ?? 12)} options={CYCLES.map((c) => ({ value: String(c.months), label: c.label }))} />
       <Field label="Renewal price (₹, before GST)" name="amount" inputMode="decimal" defaultValue={d.amount ? String(d.amount / 100) : ""} />
       <SelectField label="GST" name="gstRateBps" defaultValue={String(d.gstRateBps ?? 1800)} options={GST_RATES_BPS.map((r) => ({ value: String(r), label: `${r / 100}%` }))} />
-      <SelectField label="Project" name="costCentreId" defaultValue={d.costCentreId ?? ""} placeholder="Shared (company-wide)" options={projects.map((p) => ({ value: p.id, label: `${p.code} · ${p.name}` }))} />
+      <SelectField label="Project" name="costCentreId" defaultValue={d.costCentreId ?? ""} placeholder="—" options={centreOptions(projects)} />
       <SelectField label="Vendor (in contacts)" name="vendorId" defaultValue={d.vendorId ?? ""} placeholder="—" options={vendors.map((v) => ({ value: v.id, label: v.name }))} />
       <SelectField label="Expense account" name="accountId" defaultValue={d.accountId ?? ""} placeholder="Default: Cloud & software" options={accounts.map((a) => ({ value: a.id, label: `${a.code} · ${a.name}` }))} />
       <Field label="Account / order ref" name="reference" defaultValue={d.reference ?? ""} />

@@ -121,11 +121,17 @@ describe("projects (integration)", () => {
     await exp(10_000_00, null); // shared
     await exp(2_000_00, dept.id); // department: shared too
     await exp(5_000_00, a.id); // direct to A
+    // A purchase bill marked Common: shared by all projects.
+    const common = await db.costCentre.create({ data: { code: "COMMON", name: "Common (shared)", kind: "COMMON" } });
+    const vendor = await db.party.create({ data: { kind: "ORGANIZATION", name: "Office supplier", stateCode: "36", isVendor: true } });
+    await createInvoice({ kind: "PURCHASE", partyId: vendor.id, date: d("2026-10-06"), placeOfSupply: "36", costCentreId: common.id, lines: [{ description: "Office rent", quantity: 1, rate: 8_000_00, taxRateBps: 1800 }] });
 
     const c = await projectCosting(fy.from, fy.to);
-    expect(c.sharedCost).toBe(12_000_00);
-    expect(c.rows.find((x) => x.code === "A")).toMatchObject({ revenue: 70_000_00, directCost: 5_000_00, shareBps: 7000, sharedCost: 8_400_00, totalCost: 13_400_00, profit: 56_600_00 });
-    expect(c.rows.find((x) => x.code === "B")).toMatchObject({ revenue: 30_000_00, directCost: 0, sharedCost: 3_600_00, profit: 26_400_00 });
+    expect(c.sharedCost).toBe(20_000_00);
+    expect(c.sharedBreakdown).toEqual({ common: 8_000_00, departments: 2_000_00, untagged: 10_000_00 });
+    expect(c.rows.find((x) => x.code === "A")).toMatchObject({ revenue: 70_000_00, directCost: 5_000_00, shareBps: 7000, sharedCost: 14_000_00, totalCost: 19_000_00, profit: 51_000_00 });
+    expect(c.rows.find((x) => x.code === "B")).toMatchObject({ revenue: 30_000_00, directCost: 0, sharedCost: 6_000_00, profit: 24_000_00 });
+    expect(c.rows.find((x) => x.code === "COMMON")).toBeUndefined();
     expect(c.rows.find((x) => x.code === "ADMIN")).toBeUndefined();
   });
 });

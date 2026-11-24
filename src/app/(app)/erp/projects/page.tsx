@@ -10,6 +10,7 @@ import { ActionForm, Field, SelectField, SubmitButton } from "@/components/forms
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { saveCostCentre } from "../actions";
+import { COMMON_KIND } from "@/lib/cost-centres";
 
 export const metadata = { title: "Projects" };
 
@@ -19,7 +20,8 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
   const [centres, costing] = await Promise.all([db.costCentre.findMany({ orderBy: [{ kind: "asc" }, { code: "asc" }] }), projectCosting(r.from, r.to)]);
   const row = new Map(costing.rows.map((x) => [x.id, x]));
   const projects = centres.filter((c) => c.kind === "PROJECT");
-  const others = centres.filter((c) => c.kind !== "PROJECT");
+  const common = centres.find((c) => c.kind === COMMON_KIND);
+  const others = centres.filter((c) => c.kind !== "PROJECT" && c.kind !== COMMON_KIND);
   const revenue = costing.rows.reduce((s, x) => s + x.revenue, 0);
   const profit = costing.rows.reduce((s, x) => s + x.profit, 0);
   return (
@@ -44,7 +46,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
       </form>
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Project revenue" value={<Money value={revenue} />} />
-        <Stat label="Shared costs split" value={<Money value={costing.sharedCost} />} hint={costing.unallocated ? "Not split: no project revenue yet" : "by revenue share"} />
+        <Stat label="Shared costs split" value={<Money value={costing.sharedCost} />} hint={costing.unallocated ? "Not split: no project revenue yet" : "Common + untagged, by revenue share"} />
         <Stat label="Project profit" value={<Money value={profit} />} tone={profit >= 0 ? "good" : "bad"} />
         <Stat label="Income not tagged" value={<Money value={costing.untaggedIncome} />} hint="tag invoices with a project" />
       </div>
@@ -109,6 +111,48 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
           })}
         </T>
       )}
+      <Panel title="Shared costs (split across projects by revenue share)" className="mt-6">
+        <T head={["Source", <span key="a" className="block text-right">Amount</span>]}>
+          <tr>
+            <td className={td}>
+              {common ? (
+                <Link href={`/erp/projects/${common.id}`} className="text-primary hover:underline">
+                  Common
+                </Link>
+              ) : (
+                "Common"
+              )}
+              <div className="text-xs text-muted-foreground">bills and expenses marked &ldquo;Common: shared by all projects&rdquo;</div>
+            </td>
+            <td className={tdNum}>
+              <Money value={costing.sharedBreakdown.common} />
+            </td>
+          </tr>
+          <tr>
+            <td className={td}>
+              Departments &amp; branches
+            </td>
+            <td className={tdNum}>
+              <Money value={costing.sharedBreakdown.departments} />
+            </td>
+          </tr>
+          <tr>
+            <td className={td}>
+              Not tagged
+              <div className="text-xs text-muted-foreground">costs with no project chosen; mark them Common or a project</div>
+            </td>
+            <td className={tdNum}>
+              <Money value={costing.sharedBreakdown.untagged} className={costing.sharedBreakdown.untagged ? "text-amber-600" : ""} />
+            </td>
+          </tr>
+          <tr className="font-medium">
+            <td className={td}>Total shared</td>
+            <td className={tdNum}>
+              <Money value={costing.sharedCost} />
+            </td>
+          </tr>
+        </T>
+      </Panel>
       {others.length > 0 && (
         <Panel title="Departments & branches (their costs count as shared costs)" className="mt-6">
           <ul className="grid gap-1 text-sm">

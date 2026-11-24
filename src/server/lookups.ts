@@ -7,7 +7,7 @@ export const lookups = {
   bankAccounts: () => db.account.findMany({ where: { active: true, subtype: { in: ["BANK", "CASH", "CLEARING"] } }, select: { id: true, code: true, name: true }, orderBy: { code: "asc" } }),
   parties: (where: { isCustomer?: boolean; isVendor?: boolean } = {}) =>
     db.party.findMany({ where: { archived: false, ...where }, select: { id: true, name: true, stateCode: true, gstin: true }, orderBy: { name: "asc" }, take: 2000 }),
-  costCentres: () => db.costCentre.findMany({ where: { active: true }, select: { id: true, code: true, name: true }, orderBy: { code: "asc" } }),
+  costCentres: () => db.costCentre.findMany({ where: { active: true }, select: { id: true, code: true, name: true, kind: true }, orderBy: { code: "asc" } }),
   items: () => db.item.findMany({ where: { active: true }, select: { id: true, sku: true, name: true, hsnSac: true, salePrice: true, purchasePrice: true, taxRateBps: true, unit: true }, orderBy: { name: "asc" } }),
 };
 

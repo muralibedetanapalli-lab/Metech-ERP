@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "@/server/db";
+import { COMMON_KIND } from "@/lib/cost-centres";
 
 export interface ProjectCostRow {
   id: string;
@@ -17,8 +18,10 @@ export interface ProjectCostRow {
 
 export interface ProjectCosting {
   rows: ProjectCostRow[];
-  /** Expenses not tagged to any project (no cost centre, or a department / branch): split across projects. */
+  /** Expenses not tagged to any project (Common, a department / branch, or no tag at all): split across projects. */
   sharedCost: number;
+  /** Where the shared cost came from: marked Common, departments & branches, and lines with no tag. */
+  sharedBreakdown: { common: number; departments: number; untagged: number };
   /** Shared cost that could not be split because no project had revenue in the period. */
   unallocated: number;
   /** Income not tagged to a project; shown, never split. */
@@ -42,8 +45,8 @@ export function splitByWeight(total: number, weights: number[]): number[] {
 
 /**
  * Overall project cost for a period: revenue and direct costs come from journal lines tagged with the project
- * (its invoices, bills, expenses and synced postings); shared costs (everything untagged, plus departments and
- * branches) are split across projects in proportion to their revenue. Projects with no revenue take no share.
+ * (its invoices, bills, expenses and synced postings); shared costs (bills and expenses marked Common, departments
+ * and branches, and anything left untagged) are split across projects in proportion to their revenue. Projects with no revenue take no share.
  */
 export async function projectCosting(from: Date, to: Date): Promise<ProjectCosting> {
   const [centres, sums, accounts] = await Promise.all([
@@ -64,13 +67,17 @@ export async function projectCosting(from: Date, to: Date): Promise<ProjectCosti
   }
   const projects = centres.filter((c) => c.kind === "PROJECT");
   const projectIds = new Set(projects.map((p) => p.id));
-  let sharedCost = 0;
+  const commonIds = new Set(centres.filter((c) => c.kind === COMMON_KIND).map((c) => c.id));
+  const sharedBreakdown = { common: 0, departments: 0, untagged: 0 };
   let untaggedIncome = 0;
   for (const [id, g] of per) {
     if (id && projectIds.has(id)) continue;
-    sharedCost += g.expense;
+    if (!id) sharedBreakdown.untagged += g.expense;
+    else if (commonIds.has(id)) sharedBreakdown.common += g.expense;
+    else sharedBreakdown.departments += g.expense;
     untaggedIncome += g.income;
   }
+  const sharedCost = sharedBreakdown.common + sharedBreakdown.departments + sharedBreakdown.untagged;
   const revenue = projects.map((p) => per.get(p.id)?.income ?? 0);
   const weights = revenue.map((r) => Math.max(0, r));
   const totalWeight = weights.reduce((s, w) => s + w, 0);
@@ -91,7 +98,7 @@ export async function projectCosting(from: Date, to: Date): Promise<ProjectCosti
       budget: p.budget,
     };
   });
-  return { rows, sharedCost, unallocated: totalWeight > 0 ? 0 : sharedCost, untaggedIncome };
+  return { rows, sharedCost, sharedBreakdown, unallocated: totalWeight > 0 ? 0 : sharedCost, untaggedIncome };
 }
 
 /** Income and expense by account for one project (for its page). */

@@ -11,6 +11,7 @@ import { syncProject } from "@/server/projects/sync";
 import { zFeedPage } from "@/server/projects/feed-contract";
 import { parseRupees } from "@/lib/money";
 import { dayDate } from "@/lib/dates";
+import { COMMON_KIND } from "@/lib/cost-centres";
 import type { ActionState } from "@/lib/action-state";
 
 const paths = (id: string) => [`/erp/projects/${id}`, "/erp/projects", "/reports", "/"];
@@ -21,11 +22,14 @@ export async function updateProject(_p: ActionState, fd: FormData): Promise<Acti
     await requirePermission("erp.write");
     const start = str(fd, "startDate");
     const end = str(fd, "endDate");
+    const current = await db.costCentre.findUniqueOrThrow({ where: { id }, select: { kind: true } });
+    const kind = current.kind === COMMON_KIND ? COMMON_KIND : (str(fd, "kind") ?? "PROJECT");
+    if (kind === COMMON_KIND && current.kind !== COMMON_KIND) throw new AppError(400, "BAD_KIND", "Only the built-in Common centre can be Common");
     await db.costCentre.update({
       where: { id },
       data: {
         name: req(fd, "name", "Name"),
-        kind: str(fd, "kind") ?? "PROJECT",
+        kind,
         description: str(fd, "description"),
         budget: str(fd, "budget") ? parseRupees(fd.get("budget")) : null,
         startDate: start ? dayDate(start) : null,
