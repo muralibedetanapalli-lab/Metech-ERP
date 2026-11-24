@@ -19,7 +19,7 @@ export default async function ReportPage({ params, searchParams }: { params: Pro
   const r = dateRange(sp);
   const table = await buildReport(type as ReportType, r.from, r.to);
   const qs = `from=${r.fromIso}&to=${r.toIso}`;
-  const asOf = type === "trial-balance" || type === "balance-sheet" || type === "receivables" || type === "payables";
+  const asOf = type === "trial-balance" || type === "balance-sheet" || type === "receivables" || type === "payables" || type === "renewals";
   return (
     <>
       <PageHeader

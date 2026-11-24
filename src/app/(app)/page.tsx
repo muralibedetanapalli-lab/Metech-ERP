@@ -2,7 +2,8 @@ import Link from "next/link";
 import { db } from "@/server/db";
 import { requireUser } from "@/server/auth/session";
 import { accountSums, naturalBalance, profitAndLoss } from "@/server/accounting/reports";
-import { dateRange, hoursFromNow, monthStartIso } from "@/lib/dates";
+import { dateRange, hoursFromNow, monthStartIso, todayIso } from "@/lib/dates";
+import { timeLeft, urgencyTone } from "@/lib/renewals";
 import { Empty, Money, PageHeader, Panel, Pill, Stat, fmtDate } from "@/components/page";
 
 export const metadata = { title: "Dashboard" };
@@ -11,7 +12,7 @@ export default async function Dashboard() {
   const user = await requireUser();
   const month = dateRange({}, { from: monthStartIso() });
   const fy = dateRange({});
-  const [sums, monthPl, fyPl, openDeals, dueTasks, recent, lastSync, dukaanParties] = await Promise.all([
+  const [sums, monthPl, fyPl, openDeals, dueTasks, recent, lastSync, dukaanParties, renewals] = await Promise.all([
     accountSums({}),
     profitAndLoss(month.from, month.to),
     profitAndLoss(fy.from, fy.to),
@@ -25,7 +26,10 @@ export default async function Dashboard() {
     db.journalEntry.findMany({ where: { voided: false }, orderBy: [{ date: "desc" }, { createdAt: "desc" }], take: 8 }),
     db.syncRun.findFirst({ orderBy: { startedAt: "desc" } }),
     db.party.groupBy({ by: ["extType"], where: { extSource: "DUKAAN" }, _count: true }),
+    db.renewal.findMany({ where: { status: "ACTIVE" }, orderBy: { renewalDate: "asc" }, take: 200 }),
   ]);
+  const today = todayIso();
+  const renewalsDue = renewals.map((r) => ({ ...r, left: timeLeft(r.renewalDate, today, r.remindDays) })).filter((r) => r.left.urgency !== "ok");
   const bal = (pred: (a: (typeof sums)[number]) => boolean) => sums.filter(pred).reduce((s, a) => s + naturalBalance(a), 0);
   const cash = bal((a) => a.subtype === "BANK" || a.subtype === "CASH");
   const receivable = bal((a) => a.subtype === "RECEIVABLE");
@@ -80,6 +84,23 @@ export default async function Dashboard() {
                     {e.narration}
                   </Link>
                   <span className="shrink-0 text-xs text-muted-foreground">{fmtDate(e.date)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+        <Panel title="Renewals due" actions={<Link href="/erp/renewals" className="text-xs text-primary">All renewals</Link>} className="lg:col-span-2">
+          {renewalsDue.length === 0 ? (
+            <Empty>{renewals.length ? "Nothing to renew soon." : "Track domains, hosting and subscriptions under ERP → Renewals."}</Empty>
+          ) : (
+            <ul className="divide-y text-sm">
+              {renewalsDue.slice(0, 8).map((r) => (
+                <li key={r.id} className="flex items-center justify-between gap-2 py-2">
+                  <Link href={`/erp/renewals/${r.id}`} className="min-w-0 truncate font-medium hover:underline">
+                    {r.name}
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">{fmtDate(r.renewalDate)}</span>
+                  </Link>
+                  <Pill tone={urgencyTone(r.left.urgency)}>{r.left.label}</Pill>
                 </li>
               ))}
             </ul>

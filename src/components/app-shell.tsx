@@ -25,6 +25,7 @@ import {
   UserRound,
   Users,
   Wallet,
+  CalendarClock,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -61,6 +62,7 @@ const NAV: { section: string; items: { href: string; label: string; icon: React.
       { href: "/erp/assets", label: "Fixed assets", icon: Building2 },
       { href: "/erp/employees", label: "Employees & payroll", icon: UserRound },
       { href: "/erp/projects", label: "Projects", icon: Briefcase },
+      { href: "/erp/renewals", label: "Renewals", icon: CalendarClock },
     ],
   },
   {

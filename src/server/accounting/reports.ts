@@ -4,6 +4,7 @@ import { db } from "@/server/db";
 import type { AccountType } from "@/generated/prisma/client";
 import { isDebitNormal } from "./coa";
 import { projectCosting } from "@/server/projects/costing";
+import { RENEWAL_CATEGORIES, cycleLabel, timeLeft, yearlyCost, type RenewalCategory } from "@/lib/renewals";
 
 /** Column spec shared by on-screen tables and Excel/PDF exports. Money values are paise. */
 export interface Column {
@@ -194,7 +195,7 @@ export async function outstanding(kind: "SALES" | "PURCHASE", asOf = new Date())
 
 // ───────────────────────────── Report registry (screens + exports) ─────────────────────────────
 
-export const REPORT_TYPES = ["trial-balance", "profit-loss", "balance-sheet", "gst-summary", "receivables", "payables", "project-costing"] as const;
+export const REPORT_TYPES = ["trial-balance", "profit-loss", "balance-sheet", "gst-summary", "receivables", "payables", "project-costing", "renewals"] as const;
 export type ReportType = (typeof REPORT_TYPES)[number];
 
 export const REPORT_TITLES: Record<ReportType, string> = {
@@ -205,6 +206,7 @@ export const REPORT_TITLES: Record<ReportType, string> = {
   receivables: "Receivables (debtors)",
   payables: "Payables (creditors)",
   "project-costing": "Project costing",
+  renewals: "Renewals",
 };
 
 /** Build any report as a flat table for screens and Excel/PDF export. */
@@ -293,6 +295,37 @@ export async function buildReport(type: ReportType, from: Date, to: Date): Promi
           { code: "", name: "Shared costs in period", revenue: null, directCost: null, share: "", sharedCost: c.sharedCost, totalCost: null, profit: null, margin: c.unallocated ? "not split: no project revenue" : "" },
           { code: "", name: "Income not tagged to a project", revenue: c.untaggedIncome, directCost: null, share: "", sharedCost: null, totalCost: null, profit: null, margin: "" },
         ],
+      };
+    }
+    case "renewals": {
+      const asOf = to.toISOString().slice(0, 10);
+      const list = await db.renewal.findMany({ where: { status: "ACTIVE" }, include: { costCentre: { select: { code: true } } }, orderBy: { renewalDate: "asc" } });
+      const rows = list.map((r) => {
+        const left = timeLeft(r.renewalDate, asOf, r.remindDays);
+        return {
+          name: r.name,
+          type: RENEWAL_CATEGORIES[r.category as RenewalCategory] ?? r.category,
+          provider: r.provider ?? "",
+          project: r.costCentre?.code ?? "shared",
+          start: r.startDate.toISOString().slice(0, 10),
+          renewal: r.renewalDate.toISOString().slice(0, 10),
+          days: left.days,
+          left: left.label,
+          cycle: cycleLabel(r.cycleMonths),
+          amount: r.amount,
+          yearly: yearlyCost(r.amount, r.cycleMonths),
+        };
+      });
+      return {
+        title: REPORT_TITLES[type],
+        subtitle: `Active renewals as of ${asOf}`,
+        columns: [
+          { key: "name", label: "Name" }, { key: "type", label: "Type" }, { key: "provider", label: "Provider" }, { key: "project", label: "Project" }, { key: "start", label: "Start" },
+          { key: "renewal", label: "Renewal date" }, { key: "days", label: "Days left" }, { key: "left", label: "Time left" }, { key: "cycle", label: "Cycle" },
+          { key: "amount", label: "Price / cycle", money: true }, { key: "yearly", label: "Per year", money: true },
+        ],
+        rows,
+        totals: [{ name: "Total", type: "", provider: "", project: "", start: "", renewal: "", days: null, left: "", cycle: "", amount: rows.reduce((s, r) => s + r.amount, 0), yearly: rows.reduce((s, r) => s + r.yearly, 0) }],
       };
     }
     case "receivables":

@@ -13,6 +13,7 @@ const DESCRIPTIONS: Record<string, string> = {
   receivables: "Unpaid sales invoices with ageing.",
   payables: "Unpaid purchase bills with ageing.",
   "project-costing": "Revenue, direct cost, share of shared costs and profit for each project.",
+  renewals: "Active domains and subscriptions with renewal dates, time left and yearly cost.",
 };
 
 export default async function ReportsPage() {

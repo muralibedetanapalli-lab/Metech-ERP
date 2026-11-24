@@ -118,6 +118,7 @@ model Party {
   payments     Payment[]
   journalLines JournalLine[]
   expenses     Expense[]
+  renewals     Renewal[]
 
   @@unique([extSource, extType, extId])
   @@index([kind, archived])
@@ -250,6 +251,7 @@ model CostCentre {
   lines    JournalLine[]
   invoices Invoice[]
   syncRuns SyncRun[]
+  renewals Renewal[]
 }
 
 enum EntrySource {
@@ -591,4 +593,56 @@ model SyncEvent {
   createdAt DateTime @default(now())
 
   @@id([projectId, eventId])
+}
+
+/// Something Metech pays for on a cycle: domains, hosting, SSL, email, software, cloud, licences.
+model Renewal {
+  id           String      @id @default(cuid())
+  name         String // e.g. "metechsolutions.in", "Google Workspace (5 seats)"
+  category     String      @default("DOMAIN") // DOMAIN | HOSTING | SSL | EMAIL | SOFTWARE | CLOUD | LICENSE | OTHER
+  provider     String? // e.g. "GoDaddy", "Microsoft Azure"
+  reference    String? // account / order / customer id at the provider
+  vendorId     String?
+  vendor       Party?      @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  costCentreId String?
+  costCentre   CostCentre? @relation(fields: [costCentreId], references: [id], onDelete: SetNull)
+  /// First purchased / service start.
+  startDate    DateTime
+  /// When the current term ends and it must be renewed (expiry date).
+  renewalDate  DateTime
+  /// Term length in months (12 = yearly); 0 = no fixed cycle (set the next date by hand).
+  cycleMonths  Int         @default(12)
+  /// Expected renewal price before GST, in paise.
+  amount       Int         @default(0)
+  gstRateBps   Int         @default(1800)
+  /// Expense account renewals are booked to (default: Cloud & software).
+  accountId    String?
+  autoRenew    Boolean     @default(false)
+  /// Show it as "due soon" this many days before the renewal date.
+  remindDays   Int         @default(30)
+  status       String      @default("ACTIVE") // ACTIVE | CANCELLED
+  notes        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  history RenewalEvent[]
+
+  @@index([status, renewalDate])
+}
+
+/// One renewal that was paid: the term it covers and the expense it was booked as.
+model RenewalEvent {
+  id         String   @id @default(cuid())
+  renewalId  String
+  renewal    Renewal  @relation(fields: [renewalId], references: [id], onDelete: Cascade)
+  paidOn     DateTime
+  periodFrom DateTime
+  periodTo   DateTime
+  amount     Int // before GST, paise
+  gstAmount  Int      @default(0)
+  expenseId  String?
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([renewalId, paidOn])
 }
